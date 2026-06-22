@@ -103,10 +103,12 @@ const statuses: FeedItem['status'][] = ['热销', '新品', '补货中'];
 const owners = ['数码旗舰店', '城市装备馆', '影像实验室', '运动生活馆'];
 const tagPool = ['热卖', '新品', '精选', '专业款', '轻量'];
 
+// 生成稳定的模拟商品列表，便于三种虚拟滚动方案使用同一批数据做对比。
 export function createItems(count: number): FeedItem[] {
   return Array.from({ length: count }, (_, index) => {
     const id = index + 1;
     const product = productCatalog[index % productCatalog.length];
+    // 同一组商品模板循环使用，通过 round 生成不同编号，模拟更大的数据集。
     const round = Math.floor(index / productCatalog.length) + 1;
 
     return {
@@ -132,6 +134,7 @@ export function fetchProductList({
 }: FetchProductListOptions = {}): Promise<ProductListResponse> {
   const startedAt = performance.now();
 
+  // 用 setTimeout 模拟真实接口延迟，同时支持 AbortController 取消请求。
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new DOMException('Request aborted', 'AbortError'));
@@ -147,6 +150,7 @@ export function fetchProductList({
       resolve({
         items: createItems(count),
         total: count,
+        // 把模拟接口耗时返回给页面展示，方便观察 loading 流程。
         latencyMs: Math.round(performance.now() - startedAt),
       });
     }, delayMs);
@@ -169,6 +173,7 @@ export function filterItems(items: FeedItem[], query: string) {
     return items;
   }
 
+  // Demo 里前端直接过滤；真实大数据场景建议交给后端或 Web Worker。
   return items.filter((item) => {
     const content = `${item.title} ${item.summary} ${item.tags.join(' ')} ${item.owner} ${item.price}`.toLowerCase();
     return content.includes(keyword);

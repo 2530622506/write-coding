@@ -1,4 +1,5 @@
 :root {
+  /* 全局设计变量：三种列表入口共用同一套颜色、边框和阴影。 */
   color-scheme: light;
   --color-background: #f8fafc;
   --color-surface: #ffffff;
@@ -68,6 +69,7 @@ input:focus-visible,
 }
 
 .app-shell {
+  /* 页面主容器保持固定最大宽度，避免宽屏下列表内容过散。 */
   width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
   padding: 40px 0 56px;
@@ -105,6 +107,7 @@ h1 {
 }
 
 .route-tabs {
+  /* 顶部入口切换：定高 DOM、不定高 DOM、Canvas 三个版本。 */
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -166,6 +169,7 @@ h1 {
 }
 
 .metrics {
+  /* 指标区用于观察当前结果数、接口耗时和当前渲染策略。 */
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
@@ -193,6 +197,7 @@ h1 {
 }
 
 .feedback-panel {
+  /* 模拟接口 loading/error 状态，避免数据未返回时列表区域空白。 */
   display: grid;
   gap: 12px;
   min-height: 320px;
@@ -264,6 +269,7 @@ h1 {
 }
 
 .canvas-demo-grid {
+  /* Canvas 页面左侧是绘制区域，右侧是性能指标面板。 */
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px;
   gap: 16px;
@@ -302,6 +308,7 @@ h1 {
 }
 
 .canvas-list__canvas {
+  /* canvas 固定在滚动容器可视区域内，内容随 scrollTop 重绘。 */
   position: sticky;
   top: 0;
   display: block;
@@ -368,11 +375,13 @@ h1 {
 }
 
 .virtual-list {
+  /* 定高虚拟滚动容器：只渲染可视窗口附近的 DOM 行。 */
   overflow: auto;
   scrollbar-gutter: stable;
 }
 
 .variable-list {
+  /* 不定高虚拟滚动容器：行高由 ResizeObserver 实测后修正。 */
   overflow: auto;
   scrollbar-gutter: stable;
 }
@@ -386,6 +395,7 @@ h1 {
 }
 
 .virtual-list__window {
+  /* 定高版本使用一个整体窗口偏移到 startIndex 对应的位置。 */
   position: absolute;
   top: 0;
   right: 0;
@@ -399,6 +409,7 @@ h1 {
 }
 
 .variable-list__row {
+  /* 不定高版本每一行都根据 offsets[index] 单独定位。 */
   position: absolute;
   top: 0;
   right: 0;
@@ -409,6 +420,7 @@ h1 {
 }
 
 .feed-row {
+  /* 定高列表行，height 由外层 virtual-list__row 控制为固定值。 */
   display: grid;
   grid-template-columns: 64px minmax(280px, 1fr) 150px 202px;
   gap: 16px;
@@ -417,6 +429,7 @@ h1 {
 }
 
 .variable-feed-row {
+  /* 不定高列表行，内容自然撑开高度，供 ResizeObserver 测量。 */
   display: grid;
   grid-template-columns: 72px minmax(280px, 1fr) 150px 152px;
   gap: 16px;

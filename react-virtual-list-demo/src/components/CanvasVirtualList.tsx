@@ -36,6 +36,7 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+// Canvas 没有 CSS border-radius，这里手动画圆角矩形路径。
 function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
   const safeRadius = Math.min(radius, width / 2, height / 2);
 
@@ -48,6 +49,7 @@ function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, width:
   ctx.closePath();
 }
 
+// 绘制标签/状态胶囊，并返回实际宽度，方便后续标签横向排列。
 function drawPill(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string, background: string) {
   ctx.font = '700 12px Inter, system-ui, sans-serif';
   const width = Math.ceil(ctx.measureText(text).width) + 16;
@@ -61,6 +63,7 @@ function drawPill(ctx: CanvasRenderingContext2D, text: string, x: number, y: num
   return width;
 }
 
+// Canvas 文本不会自动省略，这里用二分查找找到能放进 maxWidth 的最长文本。
 function ellipsize(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
   if (ctx.measureText(text).width <= maxWidth) {
     return text;
@@ -83,6 +86,7 @@ function ellipsize(ctx: CanvasRenderingContext2D, text: string, maxWidth: number
   return `${text.slice(0, left)}...`;
 }
 
+// Canvas 虚拟列表：滚动区只有 canvas 和撑高元素，当前可视行全部由绘制完成。
 export function CanvasVirtualList({ items, itemHeight, height, overscan = 4 }: CanvasVirtualListProps) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -101,6 +105,7 @@ export function CanvasVirtualList({ items, itemHeight, height, overscan = 4 }: C
 
   const totalHeight = items.length * itemHeight;
 
+  // 预加载可视区附近图片，图片完成后触发一次重绘，把占位块替换成真实图片。
   const preloadImages = useCallback(
     (startIndex: number, endIndex: number) => {
       for (let index = startIndex; index < endIndex; index += 1) {
@@ -135,14 +140,17 @@ export function CanvasVirtualList({ items, itemHeight, height, overscan = 4 }: C
     }
 
     const startedAt = performance.now();
+    // 按 DPR 放大实际画布像素，避免高清屏上文字和图片发虚。
     const dpr = window.devicePixelRatio || 1;
     const width = widthRef.current || scroller.clientWidth;
     const scrollTop = scrollTopRef.current;
     const visibleCount = Math.ceil(height / itemHeight);
+    // Canvas 定高版本仍然用固定行高公式定位可视范围。
     const startIndex = clamp(Math.floor(scrollTop / itemHeight) - overscan, 0, items.length);
     const endIndex = clamp(startIndex + visibleCount + overscan * 2, startIndex, items.length);
     const nextHitAreas: HitArea[] = [];
 
+    // 容器尺寸变化时同步更新 canvas 像素尺寸和 CSS 尺寸。
     if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);
@@ -150,6 +158,7 @@ export function CanvasVirtualList({ items, itemHeight, height, overscan = 4 }: C
       canvas.style.height = `${height}px`;
     }
 
+    // setTransform 会把后续绘制坐标重新映射到 CSS 像素空间。
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = '#ffffff';
@@ -157,6 +166,7 @@ export function CanvasVirtualList({ items, itemHeight, height, overscan = 4 }: C
 
     preloadImages(startIndex, endIndex + 6);
 
+    // 每一帧只遍历并绘制可视窗口附近的商品行。
     for (let index = startIndex; index < endIndex; index += 1) {
       const item = items[index];
       const rowY = index * itemHeight - scrollTop;
@@ -179,6 +189,7 @@ export function CanvasVirtualList({ items, itemHeight, height, overscan = 4 }: C
       ctx.fill();
       if (image?.complete && image.naturalWidth > 0) {
         ctx.save();
+        // 通过 clip 实现圆角图片；进一步优化可缓存到离屏 canvas。
         roundedRect(ctx, 18, rowY + 22, 64, 48, 8);
         ctx.clip();
         ctx.drawImage(image, 18, rowY + 22, 64, 48);
@@ -232,6 +243,7 @@ export function CanvasVirtualList({ items, itemHeight, height, overscan = 4 }: C
           ctx.font = '700 12px Inter, system-ui, sans-serif';
           ctx.fillStyle = '#1e293b';
           ctx.fillText(label, actionX + 10, actionY + 27);
+          // Canvas 按钮只是像素，必须手动记录命中区域才能响应点击。
           nextHitAreas.push({ itemId: item.id, label, x: actionX, y: actionY, width: 44, height: 44 });
           actionX += 50;
         });
@@ -241,6 +253,7 @@ export function CanvasVirtualList({ items, itemHeight, height, overscan = 4 }: C
     hitAreasRef.current = nextHitAreas;
     const drawMs = performance.now() - startedAt;
 
+    // 统计面板用于观察绘制成本；生产环境可节流，避免 React 状态更新干扰滚动。
     setStats((current) => ({
       ...current,
       renderedRows: endIndex - startIndex,
@@ -255,6 +268,7 @@ export function CanvasVirtualList({ items, itemHeight, height, overscan = 4 }: C
       return;
     }
 
+    // 多次滚动/图片加载/尺寸变化只排队一帧，避免重复绘制。
     frameRef.current = window.requestAnimationFrame(draw);
   }, [draw]);
 
@@ -274,6 +288,7 @@ export function CanvasVirtualList({ items, itemHeight, height, overscan = 4 }: C
     }
 
     const resizeObserver = new ResizeObserver(([entry]) => {
+      // 监听滚动容器宽度变化，重新计算响应式布局和 canvas 尺寸。
       widthRef.current = Math.floor(entry.contentRect.width);
       scheduleDraw();
     });
@@ -292,6 +307,7 @@ export function CanvasVirtualList({ items, itemHeight, height, overscan = 4 }: C
   }, [scheduleDraw]);
 
   useEffect(() => {
+    // 数据变化时回到顶部，避免新列表仍停留在旧 scrollTop。
     scrollTopRef.current = 0;
     if (scrollerRef.current) {
       scrollerRef.current.scrollTop = 0;
@@ -303,6 +319,7 @@ export function CanvasVirtualList({ items, itemHeight, height, overscan = 4 }: C
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
+    // 将鼠标坐标和上一帧记录的按钮区域做命中检测。
     const hitArea = hitAreasRef.current.find(
       (area) => x >= area.x && x <= area.x + area.width && y >= area.y && y <= area.y + area.height,
     );
@@ -321,6 +338,7 @@ export function CanvasVirtualList({ items, itemHeight, height, overscan = 4 }: C
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
+    // Canvas 没有原生 hover 状态，这里根据命中区域手动切换鼠标样式。
     const isHoveringAction = hitAreasRef.current.some(
       (area) => x >= area.x && x <= area.x + area.width && y >= area.y && y <= area.y + area.height,
     );

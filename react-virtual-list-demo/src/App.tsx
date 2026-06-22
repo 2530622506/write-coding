@@ -14,6 +14,7 @@ const statusClassName: Record<FeedItem['status'], string> = {
 
 const variableExtraTags = ['跨店满减', '次日达', '7 天无理由', '会员折扣', '门店自提', '企业采购'];
 
+// 为不定高列表制造不同长度的详情内容，让每一行自然产生不同高度。
 function getVariableDetails(item: FeedItem, index: number) {
   const detailCount = (index % 4) + 1;
   const details = [
@@ -26,6 +27,7 @@ function getVariableDetails(item: FeedItem, index: number) {
   return details.slice(0, detailCount);
 }
 
+// 不定高列表额外追加不同数量标签，用来验证 ResizeObserver 重新测量行高。
 function getVariableTags(item: FeedItem, index: number) {
   return [...item.tags, ...variableExtraTags.slice(0, index % variableExtraTags.length)];
 }
@@ -37,6 +39,7 @@ function App() {
   const [errorMessage, setErrorMessage] = useState('');
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const currentPath = window.location.pathname;
+  // 这个 demo 使用最轻量的 pathname 分支模拟路由，避免额外引入路由库。
   const isCanvasRoute = currentPath === '/canvas';
   const isVariableRoute = currentPath === '/variable';
   const filteredItems = useMemo(() => filterItems(items, query), [items, query]);
@@ -45,6 +48,7 @@ function App() {
     setIsLoading(true);
     setErrorMessage('');
 
+    // 模拟真实接口：加载 10,000 条商品，并把耗时展示到指标区。
     fetchProductList({ count: 10000, delayMs: 650, signal })
       .then((response) => {
         setItems(response.items);
@@ -52,6 +56,7 @@ function App() {
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') {
+          // 组件卸载导致的取消请求不是错误，不需要展示给用户。
           return;
         }
 
@@ -68,6 +73,7 @@ function App() {
     const controller = new AbortController();
     loadProducts(controller.signal);
 
+    // 切换/卸载页面时取消模拟请求，避免请求完成后更新已卸载组件。
     return () => controller.abort();
   }, [loadProducts]);
 
@@ -151,6 +157,7 @@ function App() {
       ) : isCanvasRoute ? (
         <CanvasVirtualList items={filteredItems} itemHeight={92} height={560} overscan={8} />
       ) : isVariableRoute ? (
+        // 不定高版本：行高由详情段落和标签数量决定，组件会动态测量并修正 offsets。
         <section className="list-panel" aria-label="不定高虚拟列表演示">
           <div className="variable-list-header">
             <span>商品详情</span>
@@ -206,6 +213,7 @@ function App() {
           />
         </section>
       ) : (
+        // 定高版本：每一行固定 92px，索引计算和偏移计算都更简单。
         <section className="list-panel" aria-label="虚拟列表演示">
           <div className="list-header">
             <span>商品</span>

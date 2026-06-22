@@ -6,3 +6,4 @@
 {"type":"cli","id":"CLI-1782112907692-1","timestamp":"2026-06-22T07:21:47.692Z","command":"spec load","args":{"keyword":"test-conventions","stdin":false}}
 {"type":"cli","id":"CLI-1782113665287-1","timestamp":"2026-06-22T07:34:25.287Z","command":"spec load","args":{"keyword":"virtual","stdin":false}}
 {"type":"cli","id":"CLI-1782114437293-1","timestamp":"2026-06-22T07:47:17.293Z","command":"spec load","args":{"keyword":"virtual","stdin":false}}
+{"type":"cli","id":"CLI-1782117597805-1","timestamp":"2026-06-22T08:39:57.805Z","command":"spec load","args":{"keyword":"README","stdin":false}}

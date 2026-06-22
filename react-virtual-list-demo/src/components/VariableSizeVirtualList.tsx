@@ -25,6 +25,7 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+// 在 offsets 前缀和里二分查找 scrollTop 落在哪一行，避免从头线性扫描。
 function findStartIndex(offsets: number[], scrollTop: number) {
   let low = 0;
   let high = offsets.length - 1;
@@ -42,6 +43,7 @@ function findStartIndex(offsets: number[], scrollTop: number) {
   return clamp(low, 0, Math.max(offsets.length - 2, 0));
 }
 
+// 每一行渲染后用 ResizeObserver 实测高度，并把测量结果回写给父列表。
 function MeasuredRow<T>({ item, index, itemKey, totalSize, top, renderItem, onSizeChange }: MeasuredRowProps<T>) {
   const rowRef = useRef<HTMLDivElement | null>(null);
 
@@ -56,6 +58,7 @@ function MeasuredRow<T>({ item, index, itemKey, totalSize, top, renderItem, onSi
       onSizeChange(itemKey, row.getBoundingClientRect().height);
     };
 
+    // 首次挂载立即上报一次，避免必须等 ResizeObserver 回调才修正高度。
     reportSize();
 
     const observer = new ResizeObserver(reportSize);
@@ -78,6 +81,7 @@ function MeasuredRow<T>({ item, index, itemKey, totalSize, top, renderItem, onSi
   );
 }
 
+// 不定高虚拟列表：先用 estimatedItemHeight 估算，再用真实测量高度逐步修正 offsets。
 function VariableSizeVirtualListInner<T>({
   items,
   estimatedItemHeight,
@@ -93,6 +97,7 @@ function VariableSizeVirtualListInner<T>({
   const [scrollTop, setScrollTop] = useState(0);
   const [measurementVersion, setMeasurementVersion] = useState(0);
 
+  // offsets[index] 表示第 index 行顶部距离列表顶部的累计高度。
   const offsets = useMemo(() => {
     const nextOffsets = new Array<number>(items.length + 1);
     nextOffsets[0] = 0;
@@ -101,6 +106,7 @@ function VariableSizeVirtualListInner<T>({
       const item = items[index];
       const itemKey = getItemKey(item, index);
       const measuredHeight = measuredHeightsRef.current.get(itemKey);
+      // 未测量过的行先使用预估高度，测量完成后再用真实高度替换。
       nextOffsets[index + 1] = nextOffsets[index] + (measuredHeight ?? estimatedItemHeight);
     }
 
@@ -113,6 +119,7 @@ function VariableSizeVirtualListInner<T>({
   let baseEndIndex = baseStartIndex;
   const viewportBottom = scrollTop + height;
 
+  // 不定高无法用 visibleCount 直接算终点，需要一直推进到超过视口底部。
   while (baseEndIndex < items.length && offsets[baseEndIndex] < viewportBottom) {
     baseEndIndex += 1;
   }
@@ -131,11 +138,13 @@ function VariableSizeVirtualListInner<T>({
     const roundedHeight = Math.ceil(measuredHeight);
     const previousHeight = measuredHeightsRef.current.get(itemKey);
 
+    // 高度没有实际变化时不触发版本更新，避免 ResizeObserver 造成重复渲染。
     if (previousHeight !== undefined && Math.abs(previousHeight - roundedHeight) < 1) {
       return;
     }
 
     measuredHeightsRef.current.set(itemKey, roundedHeight);
+    // Map 写入不会触发 React 更新，用版本号驱动 offsets 重新计算。
     setMeasurementVersion((version) => version + 1);
   }, []);
 
@@ -146,6 +155,7 @@ function VariableSizeVirtualListInner<T>({
       return;
     }
 
+    // 与定高列表一致，scroll 高频更新通过 rAF 合帧。
     animationFrameRef.current = window.requestAnimationFrame(() => {
       animationFrameRef.current = null;
       const nextScrollTop = pendingScrollTopRef.current;
@@ -157,6 +167,7 @@ function VariableSizeVirtualListInner<T>({
   }, []);
 
   useEffect(() => {
+    // 数据源变化后，旧的高度缓存可能不再对应当前行，必须清空重新测量。
     measuredHeightsRef.current.clear();
     pendingScrollTopRef.current = 0;
     setScrollTop(0);
