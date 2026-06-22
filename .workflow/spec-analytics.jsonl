@@ -1,0 +1,8 @@
+{"type":"cli","id":"CLI-1782108637580-1","timestamp":"2026-06-22T06:10:37.580Z","command":"spec load","args":{"keyword":"react","stdin":false}}
+{"type":"cli","id":"CLI-1782111359539-1","timestamp":"2026-06-22T06:55:59.539Z","command":"spec load","args":{"keyword":"scroll","stdin":false}}
+{"type":"cli","id":"CLI-1782111815747-1","timestamp":"2026-06-22T07:03:35.747Z","command":"spec load","args":{"keyword":"canvas","stdin":false}}
+{"type":"cli","id":"CLI-1782112683743-1","timestamp":"2026-06-22T07:18:03.743Z","command":"spec load","args":{"keyword":"typescript","stdin":false}}
+{"type":"cli","id":"CLI-1782112890432-1","timestamp":"2026-06-22T07:21:30.432Z","command":"spec load","args":{"keyword":"api","stdin":false}}
+{"type":"cli","id":"CLI-1782112907692-1","timestamp":"2026-06-22T07:21:47.692Z","command":"spec load","args":{"keyword":"test-conventions","stdin":false}}
+{"type":"cli","id":"CLI-1782113665287-1","timestamp":"2026-06-22T07:34:25.287Z","command":"spec load","args":{"keyword":"virtual","stdin":false}}
+{"type":"cli","id":"CLI-1782114437293-1","timestamp":"2026-06-22T07:47:17.293Z","command":"spec load","args":{"keyword":"virtual","stdin":false}}
