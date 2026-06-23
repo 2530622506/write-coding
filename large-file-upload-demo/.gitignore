@@ -1,0 +1,6 @@
+node_modules
+dist
+server/storage
+test-files
+.DS_Store
+*.log
