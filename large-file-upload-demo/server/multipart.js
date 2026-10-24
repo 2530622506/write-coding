@@ -62,7 +62,10 @@ export function readMultipartChunk(request, onChunk) {
         return;
       }
 
-      // 直接把文件流交给存储层写入磁盘，避免先聚合成 Buffer。
+      // 分片流直接交给存储层，避免先聚合成 Buffer。
+      stream.on('limit', () => {
+        stream.destroy(new MultipartError('分片超过服务端大小限制。', 413));
+      });
       uploadPromise = onChunk({ fields, stream });
       uploadPromise.catch(reject);
     });
@@ -72,6 +75,9 @@ export function readMultipartChunk(request, onChunk) {
     });
 
     bb.on('error', reject);
+    request.once('aborted', () => {
+      bb.destroy(new MultipartError('客户端中断了分片上传。', 400));
+    });
     bb.on('finish', async () => {
       try {
         if (!uploadPromise) {

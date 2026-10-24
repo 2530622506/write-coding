@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import test from 'node:test';
 import {
+  CopyObjectCommand,
   CreateBucketCommand,
+  DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
@@ -19,6 +22,17 @@ function createMemoryStorage() {
       const { input } = command;
       if (command instanceof HeadBucketCommand) return {};
       if (command instanceof CreateBucketCommand) return {};
+      if (command instanceof DeleteObjectCommand) {
+        objects.delete(input.Key);
+        return {};
+      }
+      if (command instanceof CopyObjectCommand) {
+        const source = decodeURIComponent(input.CopySource).slice(`${input.Bucket}/`.length);
+        const object = objects.get(source);
+        if (!object) throw new Error(`Missing copy source: ${source}`);
+        objects.set(input.Key, { ...object, lastModified: new Date() });
+        return {};
+      }
       if (command instanceof PutObjectCommand) {
         const chunks = [];
         if (Buffer.isBuffer(input.Body)) chunks.push(input.Body);
@@ -65,10 +79,15 @@ test('RustFS 存储支持分片流式保存、续传查询和最终对象合并'
   const storage = createMemoryStorage();
   await storage.ensureReady();
   await saveChunk(storage, { fileHash: 'filehash1', chunkIndex: '1', buffer: Buffer.from('world') });
+  const firstChunk = Buffer.from('hello ');
   await saveChunkStream(storage, {
     fileHash: 'filehash1',
     chunkIndex: '0',
-    stream: Readable.from(Buffer.from('hello ')),
+    chunkSize: 6,
+    totalSize: 11,
+    totalChunks: 2,
+    chunkChecksum: createHash('sha256').update(firstChunk).digest('hex'),
+    stream: Readable.from(firstChunk),
   });
 
   assert.deepEqual(await listUploadedChunks(storage, 'filehash1'), [0, 1]);
@@ -80,6 +99,44 @@ test('RustFS 存储支持分片流式保存、续传查询和最终对象合并'
   assert.equal((await getMergedFile(storage, { fileHash: 'filehash1', suffix: 'txt' })).fileHash, 'filehash1');
   assert.deepEqual(await listUploadedChunks(storage, 'filehash1'), []);
   assert.equal((await listMergedFiles(storage)).length, 1);
+});
+
+
+
+test('saveChunkStream 拒绝长度不足的分片且不将其登记为已上传', async () => {
+  const storage = createMemoryStorage();
+  const truncatedChunk = Buffer.from('short');
+  await assert.rejects(
+    () => saveChunkStream(storage, {
+      fileHash: 'truncated1',
+      chunkIndex: 0,
+      chunkSize: 10,
+      totalSize: 10,
+      totalChunks: 1,
+      chunkChecksum: createHash('sha256').update(truncatedChunk).digest('hex'),
+      stream: Readable.from(truncatedChunk),
+    }),
+    (error) => error.statusCode === 422 && /长度或 SHA-256/.test(error.message),
+  );
+  assert.deepEqual(await listUploadedChunks(storage, 'truncated1'), []);
+});
+
+test('saveChunkStream 拒绝字节数相同但 SHA-256 不匹配的分片', async () => {
+  const storage = createMemoryStorage();
+  const body = Buffer.from('chunk data');
+  await assert.rejects(
+    () => saveChunkStream(storage, {
+      fileHash: 'checksum1',
+      chunkIndex: 0,
+      chunkSize: body.length,
+      totalSize: body.length,
+      totalChunks: 1,
+      chunkChecksum: '0'.repeat(64),
+      stream: Readable.from(body),
+    }),
+    (error) => error.statusCode === 422 && /长度或 SHA-256/.test(error.message),
+  );
+  assert.deepEqual(await listUploadedChunks(storage, 'checksum1'), []);
 });
 
 test('mergeChunks 在分片缺失时返回可续传的 missingChunks', async () => {

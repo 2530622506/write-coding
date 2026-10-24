@@ -95,11 +95,15 @@ async function router(request, response) {
   }
 
   if (request.method === 'POST' && requestUrl.pathname === '/api/upload/chunk') {
-    // 分片上传接口接收 multipart/form-data，Busboy 会把 chunk 文件流直接写入磁盘。
+    // 分片上传接口接收 multipart/form-data，Busboy 会把 chunk 文件流交给 RustFS 存储层校验并保存。
     const { result: uploadedChunks } = await readMultipartChunk(request, ({ fields, stream }) => {
       return saveChunkStream(storage, {
         fileHash: fields.fileHash,
         chunkIndex: fields.chunkIndex,
+        chunkSize: fields.chunkSize,
+        totalSize: fields.totalSize,
+        totalChunks: fields.totalChunks,
+        chunkChecksum: fields.chunkChecksum,
         stream,
       });
     });

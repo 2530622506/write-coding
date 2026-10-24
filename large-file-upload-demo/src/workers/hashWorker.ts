@@ -7,7 +7,7 @@ interface HashRequest {
 
 type HashWorkerMessage =
   | { type: 'progress'; percentage: number }
-  | { type: 'done'; hash: string }
+  | { type: 'done'; hash: string; chunkHashes: string[] }
   | { type: 'error'; message: string };
 
 async function readChunk(chunk: Blob) {
@@ -17,6 +17,7 @@ async function readChunk(chunk: Blob) {
 self.onmessage = async (event: MessageEvent<HashRequest>) => {
   const { file, chunkSize } = event.data;
   const spark = new SparkMD5.ArrayBuffer();
+  const chunkHashes: string[] = [];
   const totalChunks = Math.ceil(file.size / chunkSize);
 
   try {
@@ -26,6 +27,8 @@ self.onmessage = async (event: MessageEvent<HashRequest>) => {
       const buffer = await readChunk(file.slice(start, end));
 
       spark.append(buffer);
+      const digest = await crypto.subtle.digest('SHA-256', buffer);
+      chunkHashes.push(Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join(''));
       self.postMessage({
         type: 'progress',
         percentage: Math.round(((index + 1) / totalChunks) * 100),
@@ -35,6 +38,7 @@ self.onmessage = async (event: MessageEvent<HashRequest>) => {
     self.postMessage({
       type: 'done',
       hash: spark.end(),
+      chunkHashes,
     } satisfies HashWorkerMessage);
   } catch (error) {
     self.postMessage({

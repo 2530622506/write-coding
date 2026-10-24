@@ -92,18 +92,18 @@ await fetch('/upload', {
 当前项目已经实现了比较完整的一套流程：
 
 - 文件按 2 MiB（代码中为 `2 * 1024 * 1024` 字节）切片。
-- 使用 Web Worker + `spark-md5` 逐片读取并计算文件内容 MD5。
+- 使用 Web Worker + `spark-md5` 计算整文件 MD5 作为内容标识，并为每片计算 SHA-256 用于传输完整性校验。
 - 使用 hash 作为文件内容标识，支持秒传和断点续传。
 - 上传前调用 `/api/upload/status` 查询最终对象和已上传分片。
 - 使用 `XMLHttpRequest` 上传分片，以便显示实时上传进度。
 - 支持 1 到 6 个并发上传，页面可调节并发数。
 - 支持暂停、继续和单分片最多 3 次自动重试。
 - 后端使用 Busboy 流式接收 multipart 分片，并将分片对象写入 RustFS。
-- RustFS 中的分片 key 为 `chunks/<fileHash>/<index>.part`。
+- 服务端校验每片期望字节数和 SHA-256 后，才将暂存对象复制到正式 key `chunks/<fileHash>/<index>.part`。
 - 所有分片齐全后，后端按序从 RustFS 读取，并流式上传最终对象 `files/<fileHash>.<suffix>`。
 - 合并成功后清理对应的临时分片对象。
 - 使用对象 metadata 保存原始文件名等展示信息；RustFS bucket 可在启动时检查或创建。
-- 后端单元测试通过 mock S3 客户端覆盖了分片存储、合并、缺失分片、幂等处理等流程；当前测试不是连接真实 RustFS 的集成测试。
+- 后端单元测试通过 mock S3 客户端覆盖分片存储、长度/摘要校验、合并、缺失分片和幂等处理；当前测试不是连接真实 RustFS 的集成测试。
 
 这里说的 key 是对象存储 bucket 内的对象路径，不是 Node.js 服务器上的本地文件路径。
 
@@ -113,7 +113,7 @@ await fetch('/upload', {
 
 1. 用户选择文件，浏览器拿到 `File` 对象。
 2. 前端按 2 MiB 把文件切成多个应用层分片。
-3. Web Worker 分片读取文件并计算 MD5 hash。
+3. Web Worker 分片读取文件，计算整文件 MD5 和每片 SHA-256。
 4. 前端带着 hash 查询后端，判断是否秒传或续传。
 5. 前端只上传缺失分片；后端通过 Busboy 接收流，并将每片保存为 RustFS 对象。
 6. 所有分片齐全后，后端按序读取 RustFS 分片，流式写入最终对象；成功后清理临时分片。
@@ -210,9 +210,14 @@ src/workers/hashWorker.ts
 核心逻辑是：
 
 ```ts
+function toHex(buffer: ArrayBuffer) {
+  return Array.from(new Uint8Array(buffer), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 self.onmessage = async (event) => {
   const { file, chunkSize } = event.data;
   const spark = new SparkMD5.ArrayBuffer();
+  const chunkHashes = [];
   const totalChunks = Math.ceil(file.size / chunkSize);
 
   for (let index = 0; index < totalChunks; index += 1) {
@@ -221,6 +226,8 @@ self.onmessage = async (event) => {
     const buffer = await file.slice(start, end).arrayBuffer();
 
     spark.append(buffer);
+    const digest = await crypto.subtle.digest('SHA-256', buffer);
+    chunkHashes.push(toHex(digest));
     self.postMessage({
       type: 'progress',
       percentage: Math.round(((index + 1) / totalChunks) * 100),
@@ -230,6 +237,7 @@ self.onmessage = async (event) => {
   self.postMessage({
     type: 'done',
     hash: spark.end(),
+    chunkHashes,
   });
 };
 ```
@@ -239,8 +247,8 @@ self.onmessage = async (event) => {
 1. 接收主线程传来的 `file` 和 `chunkSize`。
 2. 按分片逐段读取文件。
 3. 每读一段，就追加到 `spark-md5`。
-4. 每处理完一段，就把计算进度发给主线程。
-5. 全部处理完后，把最终 hash 发给主线程。
+4. 每片计算 SHA-256，完成后把分片进度发给主线程。
+5. 全部处理完后，把整文件 MD5 和每片 SHA-256 一并发回主线程。
 
 主线程里通过下面方式创建 worker：
 
@@ -580,9 +588,10 @@ sendJson(response, 200, {
 - `totalChunks`
 - `totalSize`
 - `chunkSize`
+- `chunkChecksum`（该分片的 SHA-256 十六进制摘要）
 - `chunk`
 
-其中 `chunk` 是文件内容，其他都是元信息。
+其中 `chunk` 是文件内容，其他都是元信息。服务端会独立统计实际接收字节并计算摘要，不能只相信浏览器的上传进度。
 
 ### merge 接口
 
@@ -609,9 +618,9 @@ HTTP multipart 请求
   -> RustFS 中的 chunks/{fileHash}/{chunkIndex}.part 对象
 ```
 
-Busboy 本身只负责解析 HTTP multipart，并不负责写磁盘或连接 RustFS。当前实现中，分片流交给 `@aws-sdk/lib-storage` 的 `Upload`，而不是先读成一个完整 Buffer 再写本地文件。这样可以控制应用端的内存使用；S3 SDK 可能会在对象较大时采用 S3 Multipart Upload。
+Busboy 本身只负责解析 HTTP multipart，并不负责写磁盘或连接 RustFS。当前实现中，分片流先经过 Transform，在流式转发过程中统计字节并计算 SHA-256，再交给 `@aws-sdk/lib-storage` 的 `Upload` 写入暂存 object key，而不是先读成一个完整 Buffer。只有长度和摘要都匹配后，服务端才将暂存对象复制到正式分片 key；不匹配则返回 `422`，清理暂存对象，不会把它计入续传状态。S3 SDK 也可能在对象较大时采用 S3 Multipart Upload。
 
-相关实现位于 `server/multipart.js`、`server/index.js` 和 `server/storage.js`。路由从 multipart 字段读取 `fileHash`、`chunkIndex`，存储层校验 key 后把流写入 RustFS。上传状态查询时，后端按 `chunks/<fileHash>/` 前缀列出对象，并从对象 key 解析已完成的分片编号。
+相关实现位于 `server/multipart.js`、`server/index.js` 和 `server/storage.js`。路由读取文件 hash、分片编号、总大小、分片大小、总片数和 checksum；存储层校验请求中断、预期长度及实际 SHA-256 后再发布正式分片对象。上传状态查询只识别 `chunks/<fileHash>/<index>.part` 正式 key，不会把 `.pending` 暂存对象当成已完成分片。
 
 示意代码如下，省略了错误处理和请求限制：
 
@@ -630,12 +639,13 @@ const { result: uploadedChunks } = await readMultipartChunk(
 
 ## 12. 后端第三步：按 hash 存储分片和最终文件
 
-应用服务器不再把分片或合并后的文件保存在 `server/storage/`。它们保存在 RustFS 的 bucket 中，逻辑对象结构如下：
+应用服务器不再把分片或合并后的文件保存在 `server/storage/`。它们保存在 RustFS 的 bucket 中；分片校验期间还会使用隐藏的 `.pending/` 暂存前缀，验证通过后才发布正式分片 key。逻辑结构如下：
 
 ```text
 large-file-upload（bucket）/
   chunks/
     <fileHash>/
+      .pending/（接收中或待校验对象，不计入续传状态）
       0.part
       1.part
       2.part
@@ -643,7 +653,7 @@ large-file-upload（bucket）/
     <fileHash>.<suffix>
 ```
 
-例如，分片 key 是 `chunks/eaf61ae66c4fb863053f0b892abb258c/0.part`，最终文件 key 是 `files/eaf61ae66c4fb863053f0b892abb258c.pdf`。这些是对象 key，不是磁盘目录。RustFS 自己负责把对象持久化到其配置的数据卷中；Node 后端通过 S3 API 访问对象。
+例如，正式分片 key 是 `chunks/eaf61ae66c4fb863053f0b892abb258c/0.part`，最终文件 key 是 `files/eaf61ae66c4fb863053f0b892abb258c.pdf`。这些是对象 key，不是磁盘目录。RustFS 自己负责把对象持久化到其配置的数据卷中；Node 后端通过 S3 API 访问对象。
 
 按 hash 和分片编号组织 key，有两个好处：一是文件改名不影响内容标识；二是后端可以列出某个 hash 前缀下的分片对象，返回已上传编号供断点续传使用。最终对象的 S3 metadata 会保存清理后的原始文件名和 hash，文件列表接口据此展示信息。
 
@@ -668,7 +678,7 @@ S3_PUBLIC_URL=http://localhost:9000
 
 对象存储虽然没有传统文件系统目录，但客户端仍不能信任请求中的 `fileHash`、分片编号和文件名。当前实现会清理 hash 和后缀、要求分片下标为非负整数，并对展示用文件名做 basename 和字符清理。这样可避免把未经处理的用户输入直接拼进对象 key 或 metadata。
 
-需要注意，MD5 在这里主要用于内容标识、秒传和续传，不是身份认证或防恶意碰撞的安全机制。对抗恶意上传、权限隔离和内容安全仍需要认证授权、配额、病毒扫描等独立措施。
+整文件 MD5 在这里主要用于内容标识、秒传和续传，不是身份认证或防恶意碰撞的安全机制。逐片 SHA-256 用于发现传输中的意外截断或字节损坏；由于期望摘要由客户端提供，它也不能代替认证授权、服务端安全策略或恶意内容扫描。
 
 ## 13. 后端第四步：合并分片，并保证合并过程可靠
 
@@ -733,7 +743,7 @@ type UploadPhase =
 #1 1 MiB pending
 ```
 
-第二步，用户点击“开始上传”。前端进入 `hashing`，把文件交给 Web Worker。Worker 按块读取文件，用 `spark-md5` 计算 MD5，并把计算进度发回页面。
+第二步，用户点击“开始上传”。前端进入 `hashing`，把文件交给 Web Worker。Worker 按块读取文件，用 `spark-md5` 计算整文件 MD5，同时为每块计算 SHA-256，并把进度发回页面。
 
 第三步，hash 计算完成。前端带着 hash 查询 `/api/upload/status`。后端先检查 RustFS 中最终对象 `files/{hash}.{suffix}` 是否存在；若存在则秒传完成。否则，后端列出 `chunks/{hash}/` 前缀下的分片对象，并返回已上传编号。
 
@@ -757,37 +767,43 @@ type UploadPhase =
 
 会，MD5 存在碰撞风险，因此不能把它当作安全校验、身份认证或防恶意文件替换的依据。本项目用它作为演示中的内容标识，方便同内容秒传和断点续传。若业务需要更强的完整性保障，应额外校验可信的 SHA-256，并结合用户权限、上传会话和服务端校验；单纯换 hash 算法也不能代替授权机制。
 
-### 问题 3：为什么 hash 计算要放到 Web Worker？
+### 问题 3：后端如何发现分片传输中丢字节或损坏？
+
+上传进度到 100% 只表示浏览器报告请求数据已发送，不能单独证明对象存储中的分片与原始分片完全一致。本项目由 Worker 为每片计算 SHA-256，并随请求发送期望长度相关元数据；Node 后端在流式转发到 RustFS 时统计实际字节并重新计算 SHA-256。服务端先写入隐藏暂存 key，只有长度和摘要都匹配后才复制到正式分片 key；校验失败返回 `422` 并删除暂存对象，前端可重试该片。合并前仍检查缺片，最终对象也会对照声明总大小。
+
+客户端提供的 checksum 用来发现意外传输损坏，不是对抗恶意客户端的认证手段。真实生产系统还应使用可信会话、限额和审计，并配置清理进程崩溃遗留的暂存对象。
+
+### 问题 4：为什么 hash 计算要放到 Web Worker？
 
 因为大文件 hash 需要读取整个文件。文件很大时，如果在主线程做，页面可能卡顿。Web Worker 可以在后台做这件事，主页面还能正常响应用户操作。
 
-### 问题 4：为什么上传分片用 XHR，不用 fetch？
+### 问题 5：为什么上传分片用 XHR，不用 fetch？
 
 因为项目需要实时上传进度。`XMLHttpRequest` 有 `xhr.upload.onprogress`，可以知道当前分片已经上传多少字节。`fetch` 当前不方便直接拿上传进度。
 
-### 问题 5：为什么服务端要用 Busboy？
+### 问题 6：为什么服务端要用 Busboy？
 
 Busboy 可以流式解析 `multipart/form-data`，把分片流交给存储层。本项目再通过 S3 SDK 将流写入 RustFS，而不是写到 Node 服务的本地磁盘。这样可以避免把完整分片缓存在应用内存或依赖单机本地目录。
 
-### 问题 6：暂停后为什么还能继续？
+### 问题 7：暂停后为什么还能继续？
 
 暂停时，前端只是中断当前正在上传的请求。已经成功上传的分片已经保存在服务端。继续上传时，前端重新查询服务端已经有哪些分片，然后只补传缺失的。
 
-### 问题 7：刷新页面后还能自动继续吗？
+### 问题 8：刷新页面后还能自动继续吗？
 
 浏览器出于安全原因，不允许页面刷新后自动恢复用户之前选择的 `File` 对象。所以用户需要重新选择同一个文件。重新选择后，前端再次计算 hash。如果 hash 一样，就可以查询服务端已有分片并继续。
 
 项目里用 `localStorage` 保存最近一次上传记录，只是为了提示“检测到同一文件的续传记录”，并不能保存文件本体。
 
-### 问题 8：为什么当前实现没有 `.tmp` 文件？
+### 问题 9：为什么当前实现没有 `.tmp` 文件？
 
 `.tmp` 加 `rename` 是本地文件系统合并的一种常见做法。本项目已经改为对象存储：后端从 RustFS 顺序读取分片流，并通过 S3 SDK 上传最终对象，不会在 Node 本地创建 `.tmp` 文件。最终对象完成上传后才作为合并结果返回。对象存储的失败恢复和本地文件原子重命名不是同一套机制。
 
-### 问题 9：为什么要有合并锁？
+### 问题 10：为什么要有合并锁？
 
 如果前端重复点击，或者网络重试导致两个合并请求同时到达，后端可能同时合并同一个文件。合并锁可以让同一个 hash 同一时间只合并一次。
 
-### 问题 10：分片大小应该设置多少？
+### 问题 11：分片大小应该设置多少？
 
 没有固定答案。分片太小，请求数量太多，接口压力大。分片太大，失败重传成本高，进度也不够细。本项目用 2 MB 是为了演示方便。真实业务里可以根据文件大小和网络情况设置 2 MB、5 MB、10 MB 或更大。
 
@@ -805,7 +821,7 @@ Busboy 可以流式解析 `multipart/form-data`，把分片流交给存储层。
 
 第五，评估大文件合并的吞吐和成本。当前后端按编号读取各对象并再次上传最终对象，带来一次对象存储读取和写入流量。超大文件场景可评估原生 S3 Multipart Upload 的 `UploadPartCopy`、对象组合能力（若 RustFS 兼容支持）或由后端维护原生 multipart uploadId/part 状态。需要先验证 RustFS 兼容性、分片大小限制及失败清理策略。
 
-第六，完善数据完整性校验。MD5 用于演示中的文件内容标识，不是强安全校验。生产环境可以增加可信 checksum 校验、文件大小校验、内容扫描和审计。
+第六，完善最终文件完整性和暂存对象生命周期管理。当前已做逐片 SHA-256 与长度校验；生产环境还可对最终文件做端到端摘要验证，并配置生命周期清理崩溃遗留的 `.pending` 对象、内容扫描和审计。
 
 第七，优化并发和体验。可依据网络速度动态调整并发数，支持多文件队列、目录上传、上传会话过期恢复和更完整的错误恢复。
 
@@ -821,7 +837,7 @@ Busboy 可以流式解析 `multipart/form-data`，把分片流交给存储层。
 
 要展示实时上传进度，所以前端使用 XHR；要暂停和重试，就以单个分片为上传与恢复单位。
 
-后端通过 Busboy 接收分片流，再通过 S3 兼容 API 将分片保存到 RustFS。分片齐全后，后端按序读取对象并流式写入最终对象，完成后清理临时分片对象。
+后端通过 Busboy 接收分片流，边传 RustFS 边校验每片长度和 SHA-256；通过后发布正式分片对象。分片齐全后，后端按序读取对象并流式写入最终对象，完成后清理临时分片对象。
 
 ```text
 选择文件 -> 切片 -> Web Worker 算 hash -> 查询 RustFS 状态

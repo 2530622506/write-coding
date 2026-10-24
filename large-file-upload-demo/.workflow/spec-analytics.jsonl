@@ -12,3 +12,6 @@
 {"type":"cli","id":"CLI-1792823004767-1","timestamp":"2026-10-24T06:23:24.767Z","command":"load","args":{"type":"spec","category":"coding"}}
 {"type":"cli","id":"CLI-1792823086197-1","timestamp":"2026-10-24T06:24:46.197Z","command":"load","args":{"type":"spec","category":"coding"}}
 {"type":"cli","id":"CLI-1792823187446-1","timestamp":"2026-10-24T06:26:27.446Z","command":"load","args":{"type":"spec","category":"debug"}}
+{"type":"cli","id":"CLI-1792823363566-1","timestamp":"2026-10-24T06:29:23.566Z","command":"load","args":{"type":"spec","category":"coding"}}
+{"type":"cli","id":"CLI-1792824332329-1","timestamp":"2026-10-24T06:45:32.329Z","command":"load","args":{"type":"spec","category":"review"}}
+{"type":"cli","id":"CLI-1792824856839-1","timestamp":"2026-10-24T06:54:16.839Z","command":"load","args":{"type":"spec","category":"coding"}}

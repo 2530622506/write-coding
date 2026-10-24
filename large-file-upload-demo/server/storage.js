@@ -1,5 +1,7 @@
-import { Readable } from 'node:stream';
-import { S3Client, CreateBucketCommand, DeleteObjectCommand, DeleteObjectsCommand, HeadBucketCommand, HeadObjectCommand, ListObjectsV2Command, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { createHash, randomUUID } from 'node:crypto';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { S3Client, CopyObjectCommand, CreateBucketCommand, DeleteObjectCommand, DeleteObjectsCommand, HeadBucketCommand, HeadObjectCommand, ListObjectsV2Command, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import path from 'node:path';
 
@@ -122,10 +124,82 @@ export async function saveChunk(storage, { fileHash, chunkIndex, buffer }) {
 }
 
 // 将 Busboy 提供的请求流直接交给 S3 Upload，避免在应用层缓存整个分片。
-export async function saveChunkStream(storage, { fileHash, chunkIndex, stream }) {
-  const key = storage.chunkKey(fileHash, chunkIndex);
-  // lib-storage handles unknown-length streams; each browser chunk is bounded (2 MB by default).
-  await storage.uploader({ Bucket: storage.bucket, Key: key, Body: stream, ContentType: 'application/octet-stream' });
+export async function saveChunkStream(storage, {
+  fileHash,
+  chunkIndex,
+  chunkSize,
+  totalSize,
+  totalChunks,
+  chunkChecksum,
+  stream,
+}) {
+  const index = parseChunkIndex(chunkIndex);
+  const chunkSizeNumber = Number(chunkSize);
+  const totalSizeNumber = Number(totalSize);
+  const totalChunksNumber = Number(totalChunks);
+  const expectedCount = Math.ceil(totalSizeNumber / chunkSizeNumber);
+
+  if (
+    !Number.isSafeInteger(chunkSizeNumber) || chunkSizeNumber <= 0 ||
+    !Number.isSafeInteger(totalSizeNumber) || totalSizeNumber <= 0 ||
+    !Number.isSafeInteger(totalChunksNumber) || totalChunksNumber !== expectedCount ||
+    index >= totalChunksNumber || !/^[a-f0-9]{64}$/i.test(String(chunkChecksum || ''))
+  ) {
+    throw Object.assign(new Error('分片大小、总大小、分片数量或 SHA-256 参数不合法。'), { statusCode: 400 });
+  }
+
+  const expectedBytes = Math.min(chunkSizeNumber, totalSizeNumber - index * chunkSizeNumber);
+  if (expectedBytes <= 0) {
+    throw Object.assign(new Error('分片编号超出文件范围。'), { statusCode: 400 });
+  }
+
+  const key = storage.chunkKey(fileHash, index);
+  // 验证前先写入隐藏的暂存 key；只有长度和摘要都通过后，才复制到续传可见的正式 key。
+  const stagingKey = `${storage.chunkPrefix(fileHash)}.pending/${index}-${randomUUID()}.part`;
+  const digest = createHash('sha256');
+  let receivedBytes = 0;
+  const verifier = new Transform({
+    transform(chunk, encoding, callback) {
+      receivedBytes += chunk.length;
+      if (receivedBytes > expectedBytes) {
+        callback(Object.assign(new Error('分片实际字节数超过预期。'), { statusCode: 422 }));
+        return;
+      }
+      digest.update(chunk);
+      callback(null, chunk);
+    },
+  });
+
+  try {
+    const uploadPromise = storage.uploader({
+      Bucket: storage.bucket,
+      Key: stagingKey,
+      Body: verifier,
+      ContentType: 'application/octet-stream',
+    });
+    const [streamResult, uploadResult] = await Promise.allSettled([
+      pipeline(stream, verifier),
+      uploadPromise,
+    ]);
+    if (streamResult.status === 'rejected') throw streamResult.reason;
+    if (uploadResult.status === 'rejected') throw uploadResult.reason;
+
+    const actualChecksum = digest.digest('hex');
+    if (receivedBytes !== expectedBytes || actualChecksum !== String(chunkChecksum).toLowerCase()) {
+      throw Object.assign(new Error('分片长度或 SHA-256 校验失败，请重新上传该分片。'), { statusCode: 422 });
+    }
+
+    const copySource = `${storage.bucket}/${encodeURIComponent(stagingKey).replace(/%2F/g, '/')}`;
+    await storage.client.send(new CopyObjectCommand({
+      Bucket: storage.bucket,
+      Key: key,
+      CopySource: copySource,
+    }));
+  } finally {
+    // 正式对象只在校验后生成；暂存对象无论成功失败都尽力清理。
+    await storage.client.send(new DeleteObjectCommand({ Bucket: storage.bucket, Key: stagingKey }));
+  }
+
   return listUploadedChunks(storage, fileHash);
 }
 

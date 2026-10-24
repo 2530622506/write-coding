@@ -49,6 +49,7 @@ interface ChunkItem {
   uploadedBytes: number;
   retries: number;
   status: ChunkStatus;
+  checksum?: string;
 }
 
 interface ResumeRecord {
@@ -64,6 +65,7 @@ interface HashWorkerMessage {
   type: 'progress' | 'done' | 'error';
   percentage?: number;
   hash?: string;
+  chunkHashes?: string[];
   message?: string;
 }
 
@@ -175,6 +177,8 @@ export default function App() {
   const xhrsRef = useRef<XMLHttpRequest[]>([]);
   // hash worker 也需要保存引用，重置时可以终止后台计算。
   const hashWorkerRef = useRef<Worker | null>(null);
+  // 缓存当前所选文件的逐片 SHA-256，重试时避免重复计算。
+  const chunkHashesRef = useRef<string[]>([]);
   // pausedRef 不触发渲染，适合给并发 worker 判断是否应该停止取新任务。
   const pausedRef = useRef(false);
 
@@ -220,6 +224,7 @@ export default function App() {
     // 选择新文件时清空上一轮上传状态，避免进度和分片统计串到新文件上。
     setFile(nextFile);
     setFileHash('');
+    chunkHashesRef.current = [];
     setHashProgress(0);
     setChunkItems(nextFile ? createInitialChunks(nextFile) : []);
     setProgress(0);
@@ -238,6 +243,7 @@ export default function App() {
     hashWorkerRef.current = null;
     pausedRef.current = false;
     setFileHash('');
+    chunkHashesRef.current = [];
     setHashProgress(0);
     setChunkItems(file ? createInitialChunks(file) : []);
     setProgress(0);
@@ -248,12 +254,12 @@ export default function App() {
     setMessage(file ? '已重置本次上传状态。' : '请选择一个文件开始上传。');
   }
 
-  function calculateHash(currentFile: File) {
+  function calculateHash(currentFile: File): Promise<{ hash: string; chunkHashes: string[] }> {
     setPhase('hashing');
     setHashProgress(0);
     setMessage('正在使用 Web Worker 计算文件内容 hash。');
 
-    return new Promise<string>((resolve, reject) => {
+    return new Promise<{ hash: string; chunkHashes: string[] }>((resolve, reject) => {
       const worker = new Worker(new URL('./workers/hashWorker.ts', import.meta.url), { type: 'module' });
       hashWorkerRef.current = worker;
 
@@ -269,7 +275,7 @@ export default function App() {
           worker.terminate();
           hashWorkerRef.current = null;
           setHashProgress(100);
-          resolve(payload.hash);
+          resolve({ hash: payload.hash, chunkHashes: payload.chunkHashes || [] });
           return;
         }
 
@@ -342,6 +348,7 @@ export default function App() {
       formData.append('totalChunks', String(Math.ceil(currentFile.size / CHUNK_SIZE)));
       formData.append('totalSize', String(currentFile.size));
       formData.append('chunkSize', String(CHUNK_SIZE));
+      formData.append('chunkChecksum', item.checksum || '');
       formData.append('chunk', currentFile.slice(start, end), currentFile.name);
 
       xhrsRef.current.push(xhr);
@@ -462,8 +469,16 @@ export default function App() {
     setError('');
 
     try {
-      const hash = fileHash || (await calculateHash(currentFile));
-      const chunks = createInitialChunks(currentFile);
+      const cachedHashesMatch = chunkHashesRef.current.length === Math.ceil(currentFile.size / CHUNK_SIZE);
+      const hashResult = fileHash && cachedHashesMatch
+        ? { hash: fileHash, chunkHashes: chunkHashesRef.current }
+        : await calculateHash(currentFile);
+      const { hash, chunkHashes } = hashResult;
+      chunkHashesRef.current = chunkHashes;
+      const chunks: ChunkItem[] = createInitialChunks(currentFile).map((chunk) => ({
+        ...chunk,
+        checksum: chunkHashes[chunk.index] || '',
+      }));
       let currentItems = chunks;
       const getItems = () => currentItems;
       const commitItems = (items: ChunkItem[]) => {
