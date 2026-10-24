@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import http from 'node:http';
 import { URL } from 'node:url';
 import {

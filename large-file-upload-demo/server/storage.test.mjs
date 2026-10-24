@@ -1,124 +1,101 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { Readable } from 'node:stream';
 import test from 'node:test';
 import {
-  createStorage,
-  ensureInside,
-  getMergedFile,
-  listUploadedChunks,
-  mergeChunks,
-  safeFileName,
-  saveChunk,
-  saveChunkStream,
-} from './storage.js';
+  CreateBucketCommand,
+  DeleteObjectsCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+} from '@aws-sdk/client-s3';
+import { createStorage, getMergedFile, listMergedFiles, listUploadedChunks, mergeChunks, safeFileName, saveChunk, saveChunkStream } from './storage.js';
+
+function createMemoryStorage() {
+  const objects = new Map();
+  const client = {
+    async send(command) {
+      const { input } = command;
+      if (command instanceof HeadBucketCommand) return {};
+      if (command instanceof CreateBucketCommand) return {};
+      if (command instanceof PutObjectCommand) {
+        const chunks = [];
+        if (Buffer.isBuffer(input.Body)) chunks.push(input.Body);
+        else for await (const chunk of input.Body) chunks.push(Buffer.from(chunk));
+        objects.set(input.Key, { body: Buffer.concat(chunks), metadata: input.Metadata || {}, lastModified: new Date() });
+        return {};
+      }
+      if (command instanceof HeadObjectCommand) {
+        const object = objects.get(input.Key);
+        if (!object) throw Object.assign(new Error('Not Found'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } });
+        return { ContentLength: object.body.length, Metadata: object.metadata, LastModified: object.lastModified };
+      }
+      if (command instanceof GetObjectCommand) {
+        const object = objects.get(input.Key);
+        if (!object) throw Object.assign(new Error('Not Found'), { name: 'NoSuchKey', $metadata: { httpStatusCode: 404 } });
+        return { Body: Readable.from(object.body) };
+      }
+      if (command instanceof ListObjectsV2Command) {
+        return { Contents: [...objects.entries()]
+          .filter(([key]) => key.startsWith(input.Prefix || ''))
+          .map(([Key, object]) => ({ Key, Size: object.body.length, LastModified: object.lastModified })) };
+      }
+      if (command instanceof DeleteObjectsCommand) {
+        for (const { Key } of input.Delete.Objects) objects.delete(Key);
+        return {};
+      }
+      throw new Error(`Unexpected command: ${command.constructor.name}`);
+    },
+  };
+  const uploader = async ({ Bucket, Key, Body, Metadata, ContentType }) => {
+    const chunks = [];
+    if (Buffer.isBuffer(Body)) chunks.push(Body);
+    else for await (const chunk of Body) chunks.push(Buffer.from(chunk));
+    return client.send(new PutObjectCommand({ Bucket, Key, Body: Buffer.concat(chunks), Metadata, ContentType }));
+  };
+  return createStorage({ client, bucket: 'test-bucket', uploader });
+}
 
 test('safeFileName 保留中文、英文、数字和常见文件符号', () => {
-  // 覆盖文件名清洗逻辑，避免路径片段和特殊字符原样进入存储路径。
   assert.equal(safeFileName('../测试 文件?.zip'), '测试_文件_.zip');
 });
 
-test('ensureInside 阻止路径逃逸', () => {
-  // 路径安全是上传服务的底线，必须阻止目标文件逃出 storage 根目录。
-  const root = path.join(os.tmpdir(), 'upload-root');
-  assert.doesNotThrow(() => ensureInside(root, path.join(root, 'a.txt')));
-  assert.throws(() => ensureInside(root, path.join(root, '../a.txt')), /文件路径越界/);
+test('RustFS 存储支持分片流式保存、续传查询和最终对象合并', async () => {
+  const storage = createMemoryStorage();
+  await storage.ensureReady();
+  await saveChunk(storage, { fileHash: 'filehash1', chunkIndex: '1', buffer: Buffer.from('world') });
+  await saveChunkStream(storage, {
+    fileHash: 'filehash1',
+    chunkIndex: '0',
+    stream: Readable.from(Buffer.from('hello ')),
+  });
+
+  assert.deepEqual(await listUploadedChunks(storage, 'filehash1'), [0, 1]);
+  const file = await mergeChunks(storage, {
+    fileHash: 'filehash1', fileName: 'demo 文件.txt', suffix: 'txt', totalChunks: 2, totalSize: 11,
+  });
+  assert.equal(file.originalName, 'demo_文件.txt');
+  assert.equal(file.size, 11);
+  assert.equal((await getMergedFile(storage, { fileHash: 'filehash1', suffix: 'txt' })).fileHash, 'filehash1');
+  assert.deepEqual(await listUploadedChunks(storage, 'filehash1'), []);
+  assert.equal((await listMergedFiles(storage)).length, 1);
 });
 
-test('saveChunkStream 可以流式保存分片', async () => {
-  // Busboy 传入的是 stream，存储层应直接写磁盘而不是先聚合成 Buffer。
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'upload-demo-'));
-  const storage = createStorage(tempDir);
-
-  try {
-    await storage.ensureReady();
-    await saveChunkStream(storage, {
-      fileHash: 'hash-stream',
-      chunkIndex: '0',
-      stream: Readable.from(Buffer.from('stream chunk')),
-    });
-
-    assert.deepEqual(await listUploadedChunks(storage, 'hash-stream'), [0]);
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
-  }
+test('mergeChunks 在分片缺失时返回可续传的 missingChunks', async () => {
+  const storage = createMemoryStorage();
+  await saveChunk(storage, { fileHash: 'filehash2', chunkIndex: '0', buffer: Buffer.from('hello') });
+  await assert.rejects(
+    () => mergeChunks(storage, { fileHash: 'filehash2', fileName: 'demo.txt', suffix: 'txt', totalChunks: 2 }),
+    (error) => error.statusCode === 409 && error.details.missingChunks[0] === 1,
+  );
 });
 
-test('saveChunk 和 mergeChunks 可以按下标合并文件并写入 metadata', async () => {
-  // 先乱序保存分片，再校验合并后能按下标恢复原始内容。
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'upload-demo-'));
-  const storage = createStorage(tempDir);
-
-  try {
-    await storage.ensureReady();
-    await saveChunk(storage, { fileHash: 'filehash1', chunkIndex: '1', buffer: Buffer.from('world') });
-    await saveChunk(storage, { fileHash: 'filehash1', chunkIndex: '0', buffer: Buffer.from('hello ') });
-
-    assert.deepEqual(await listUploadedChunks(storage, 'filehash1'), [0, 1]);
-
-    const file = await mergeChunks(storage, {
-      fileHash: 'filehash1',
-      fileName: 'demo.txt',
-      suffix: 'txt',
-      totalChunks: '2',
-      totalSize: '11',
-    });
-    const content = await readFile(path.join(storage.filesRoot, file.fileName), 'utf8');
-    const existingFile = await getMergedFile(storage, { fileHash: 'filehash1', suffix: 'txt' });
-
-    assert.equal(content, 'hello world');
-    assert.equal(file.originalName, 'demo.txt');
-    assert.equal(existingFile.fileHash, 'filehash1');
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
-  }
-});
-
-test('mergeChunks 对已合并文件保持幂等', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'upload-demo-'));
-  const storage = createStorage(tempDir);
-
-  try {
-    await storage.ensureReady();
-    await saveChunk(storage, { fileHash: 'filehash2', chunkIndex: '0', buffer: Buffer.from('hello') });
-
-    const first = await mergeChunks(storage, {
-      fileHash: 'filehash2',
-      fileName: 'demo.txt',
-      suffix: 'txt',
-      totalChunks: '1',
-      totalSize: '5',
-    });
-    const second = await mergeChunks(storage, {
-      fileHash: 'filehash2',
-      fileName: 'demo.txt',
-      suffix: 'txt',
-      totalChunks: '1',
-      totalSize: '5',
-    });
-
-    assert.equal(first.fileName, second.fileName);
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
-  }
-});
-
-test('mergeChunks 会报告缺失分片', async () => {
-  // 缺分片时不能生成最终文件，应该返回可恢复的业务错误。
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'upload-demo-'));
-  const storage = createStorage(tempDir);
-
-  try {
-    await storage.ensureReady();
-    await saveChunk(storage, { fileHash: 'filehash3', chunkIndex: '0', buffer: Buffer.from('hello') });
-
-    await assert.rejects(
-      () => mergeChunks(storage, { fileHash: 'filehash3', fileName: 'demo.txt', suffix: 'txt', totalChunks: '2' }),
-      /还有 1 个分片未上传/,
-    );
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
-  }
+test('mergeChunks 对已完成对象保持幂等', async () => {
+  const storage = createMemoryStorage();
+  await saveChunk(storage, { fileHash: 'filehash3', chunkIndex: '0', buffer: Buffer.from('hello') });
+  const payload = { fileHash: 'filehash3', fileName: 'demo.txt', suffix: 'txt', totalChunks: 1, totalSize: 5 };
+  const first = await mergeChunks(storage, payload);
+  const second = await mergeChunks(storage, payload);
+  assert.equal(first.fileName, second.fileName);
 });

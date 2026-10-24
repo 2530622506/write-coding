@@ -4,3 +4,7 @@ server/storage
 test-files
 .DS_Store
 *.log
+
+.env
+
+volumes/

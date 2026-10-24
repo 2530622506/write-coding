@@ -1,0 +1,14 @@
+{"type":"cli","id":"CLI-1792745706533-1","timestamp":"2026-10-23T08:55:06.533Z","command":"load","args":{"type":"spec","category":"coding"}}
+{"type":"cli","id":"CLI-1792761108919-1","timestamp":"2026-10-23T13:11:48.919Z","command":"load","args":{"type":"spec","category":"coding"}}
+{"type":"cli","id":"CLI-1792761108979-1","timestamp":"2026-10-23T13:11:48.979Z","command":"load","args":{"type":"knowhow"}}
+{"type":"cli","id":"CLI-1792811712525-1","timestamp":"2026-10-24T03:15:12.525Z","command":"load","args":{"type":"spec","category":"arch"}}
+{"type":"cli","id":"CLI-1792811712582-1","timestamp":"2026-10-24T03:15:12.582Z","command":"load","args":{"type":"knowhow"}}
+{"type":"cli","id":"CLI-1792814626981-1","timestamp":"2026-10-24T04:03:46.981Z","command":"load","args":{"type":"spec","category":"coding"}}
+{"type":"cli","id":"CLI-1792818429464-1","timestamp":"2026-10-24T05:07:09.464Z","command":"load","args":{"type":"spec","category":"review"}}
+{"type":"cli","id":"CLI-1792818625110-1","timestamp":"2026-10-24T05:10:25.110Z","command":"load","args":{"type":"spec","category":"coding"}}
+{"type":"cli","id":"CLI-1792820312008-1","timestamp":"2026-10-24T05:38:32.008Z","command":"load","args":{"type":"spec","category":"review"}}
+{"type":"cli","id":"CLI-1792821470104-1","timestamp":"2026-10-24T05:57:50.104Z","command":"load","args":{"type":"spec","category":"coding"}}
+{"type":"cli","id":"CLI-1792822196520-1","timestamp":"2026-10-24T06:09:56.520Z","command":"load","args":{"type":"spec","category":"review"}}
+{"type":"cli","id":"CLI-1792823004767-1","timestamp":"2026-10-24T06:23:24.767Z","command":"load","args":{"type":"spec","category":"coding"}}
+{"type":"cli","id":"CLI-1792823086197-1","timestamp":"2026-10-24T06:24:46.197Z","command":"load","args":{"type":"spec","category":"coding"}}
+{"type":"cli","id":"CLI-1792823187446-1","timestamp":"2026-10-24T06:26:27.446Z","command":"load","args":{"type":"spec","category":"debug"}}

@@ -29,6 +29,19 @@ PORT=3002 npm run dev:server
 VITE_API_TARGET=http://localhost:3002 npm run dev:client
 ```
 
+## RustFS（Docker）
+
+如果已有 RustFS 服务，复制 `.env.example` 为 `.env` 并按实际配置修改即可。需要单独使用 Docker 启动时：
+
+```bash
+cp .env.example .env
+docker compose up -d rustfs
+```
+
+Node 后端从 `.env` 读取 `S3_ENDPOINT`、`S3_PORT`、`S3_ACCESS_KEY_ID`、`S3_SECRET_ACCESS_KEY` 和 `S3_BUCKET`，并在启动时检查或创建 bucket。分片对象位于 `chunks/{fileHash}/{index}.part`，完成文件位于 `files/{fileHash}.{suffix}`。Docker named volume 持久化 RustFS 数据。
+
+`.env` 不会提交到 Git。示例凭据仅用于本地演示，生产部署请设置强密钥并限制 RustFS 网络访问。
+
 ## 验证命令
 
 ```bash
@@ -48,8 +61,8 @@ npm run build
 - 使用 `XMLHttpRequest` 展示实时上传进度。
 - 单个分片失败后最多自动重试 3 次。
 - 页面展示每个分片的上传状态和重试次数。
-- 后端使用 `Busboy` 流式保存分片，避免把分片请求整体读入内存。
-- 所有分片上传完成后，后端按顺序流式合并文件。
+- 后端使用 `Busboy` 接收分片，并将分片对象存入 RustFS（S3 兼容对象存储）。
+- 所有分片上传完成后，后端按顺序从 RustFS 流式读取并上传合并对象，成功后清理分片对象。
 - 页面展示上传进度、速度、分片数量、已上传容量和服务端已合并文件列表。
 
 ## 核心文档
