@@ -7,3 +7,16 @@
 {"type":"cli","id":"CLI-1782113665287-1","timestamp":"2026-06-22T07:34:25.287Z","command":"spec load","args":{"keyword":"virtual","stdin":false}}
 {"type":"cli","id":"CLI-1782114437293-1","timestamp":"2026-06-22T07:47:17.293Z","command":"spec load","args":{"keyword":"virtual","stdin":false}}
 {"type":"cli","id":"CLI-1782117597805-1","timestamp":"2026-06-22T08:39:57.805Z","command":"spec load","args":{"keyword":"README","stdin":false}}
+{"type":"cli","id":"CLI-1782119181037-1","timestamp":"2026-06-22T09:06:21.037Z","command":"spec load","args":{"keyword":"upload","stdin":false}}
+{"type":"cli","id":"CLI-1782120034084-1","timestamp":"2026-06-22T09:20:34.084Z","command":"spec add","args":{"category":"debug","keywords":"node-esm,fileurltopath,import-meta-url,path-encoding","stdin":false}}
+{"type":"cli","id":"CLI-1782120051332-1","timestamp":"2026-06-22T09:20:51.332Z","command":"spec load","args":{"keyword":"注释","stdin":false}}
+{"type":"cli","id":"CLI-1782120800722-1","timestamp":"2026-06-22T09:33:20.722Z","command":"spec load","args":{"keyword":"大文件上传","stdin":false}}
+{"type":"cli","id":"CLI-1782120895740-1","timestamp":"2026-06-22T09:34:55.740Z","command":"spec load","args":{"keyword":"大文件上传","stdin":false}}
+{"type":"cli","id":"CLI-1782128324871-1","timestamp":"2026-06-22T11:38:44.871Z","command":"spec load","args":{"keyword":"大文件上传","stdin":false}}
+{"type":"cli","id":"CLI-1782181454232-1","timestamp":"2026-06-23T02:24:14.232Z","command":"spec load","args":{"keyword":"大文件上传","stdin":false}}
+{"type":"cli","id":"CLI-1782182053832-1","timestamp":"2026-06-23T02:34:13.832Z","command":"spec load","args":{"keyword":"启动","stdin":false}}
+{"type":"cli","id":"CLI-1782182905249-1","timestamp":"2026-06-23T02:48:25.249Z","command":"spec load","args":{"keyword":"JSON","stdin":false}}
+{"type":"cli","id":"CLI-1782185342400-1","timestamp":"2026-06-23T03:29:02.400Z","command":"spec load","args":{"keyword":"README","stdin":false}}
+{"type":"cli","id":"CLI-1782185465069-1","timestamp":"2026-06-23T03:31:05.069Z","command":"spec load","args":{"keyword":"git","stdin":false}}
+{"type":"cli","id":"CLI-1782185672601-1","timestamp":"2026-06-23T03:34:32.601Z","command":"spec load","args":{"keyword":"虚拟列表","stdin":false}}
+{"type":"cli","id":"CLI-1782186319140-1","timestamp":"2026-06-23T03:45:19.140Z","command":"spec load","args":{"keyword":"图片","stdin":false}}

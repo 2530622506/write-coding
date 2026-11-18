@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "generatedAt": 1782117597835,
+  "generatedAt": 1782186319188,
   "entries": [
     {
       "id": "spec:project:architecture-constraints",
@@ -70,12 +70,37 @@
       ],
       "status": "active",
       "created": "2026-06-22T06:10:37.637Z",
-      "updated": "2026-06-22T06:10:37.638Z",
+      "updated": "2026-06-22T09:20:34.147Z",
       "scope": "project",
       "category": "debug",
       "createdBy": null,
       "sourceRef": null,
       "parent": null,
+      "related": [],
+      "source": {
+        "kind": "file",
+        "path": "specs/debug-notes.md"
+      }
+    },
+    {
+      "id": "spec:project:debug-notes-001",
+      "type": "spec",
+      "title": "Node ESM 本地路径应使用 fileURLToPath",
+      "summary": "### Node ESM 本地路径应使用 fileURLToPath 在 Node ESM 中，不要直接使用 import.meta.url.pathname 作为本地文件系统路径；当项目路径包含空格等字符时，pathname 会保留 URL 编码（例如 %20），可能导致 mkdir/read/write 指向错误目录。应使用 fileURLToPath(import.meta.url 或目录 URL) 转成真实文件路径，再交给 path.join、fs/promises",
+      "tags": [
+        "node-esm",
+        "fileurltopath",
+        "import-meta-url",
+        "path-encoding"
+      ],
+      "status": "active",
+      "created": "2026-06-22T06:10:37.637Z",
+      "updated": "2026-06-22T09:20:34.147Z",
+      "scope": "project",
+      "category": "debug",
+      "createdBy": null,
+      "sourceRef": null,
+      "parent": "spec:project:debug-notes",
       "related": [],
       "source": {
         "kind": "file",
